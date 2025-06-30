@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mini WebSocket Chat</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 2rem auto; }
+    #messages { border: 1px solid #ccc; padding: 1rem; height: 300px; overflow-y: auto; }
+    #input { width: 80%; }
+    #send { width: 18%; }
+  </style>
+</head>
+<body>
+  <h1>WebSocket Chat</h1>
+  <div id="messages"></div>
+  <input id="input" placeholder="Type a message...">
+  <button id="send">Send</button>
+
+  <script>
+    let ws;
+    let username;
+
+    function appendMessage(text, cls = '') {
+      const div = document.createElement('div');
+      div.textContent = text;
+      if (cls) div.className = cls;
+      document.getElementById('messages').appendChild(div);
+      div.scrollIntoView();
+    }
+
+    function startChat() {
+      ws = new WebSocket(`ws://${location.host}`);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'login', username }));
+      };
+
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'system') {
+          appendMessage(`[System] ${msg.text}`, 'system');
+        } else if (msg.type === 'chat') {
+          appendMessage(`${msg.sender}: ${msg.text}`);
+        }
+      };
+
+      ws.onclose = () => {
+        appendMessage('[System] Disconnected from server.', 'system');
+      };
+    }
+
+    document.getElementById('send').onclick = () => {
+      const input = document.getElementById('input');
+      if (input.value && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'chat', text: input.value }));
+        appendMessage(`You: ${input.value}`);
+        input.value = '';
+      }
+    };
+
+    // Ask for username first
+    username = prompt('Enter your username:', `Guest${Math.floor(Math.random()*1000)}`) || `Guest${Math.floor(Math.random()*1000)}`;
+    startChat();
+  </script>
+</body>
+</html>
