@@ -28,7 +28,7 @@
   <div id="chatArea" style="display:none;">
     <div id="messages"></div>
     <input id="input" placeholder="Type a message...">
-    <button id="send">Send</button>
+    <button id="send" type="submit">Send</button>
   </div>
 
   <script>
@@ -93,6 +93,11 @@
         input.value = '';
       }
     };
+
+    fetch('/rooms')
+    .then(res => res.json())
+    .then(updateRoomsList)
+    .catch(err => console.error('Error loading rooms:', err));
   </script>
 </body>
 </html>

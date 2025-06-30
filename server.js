@@ -3,6 +3,8 @@ import http from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dbConnection from './db/connection.js';
+import Room from './db/models/Room.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,14 +13,25 @@ const app = express();
 const port = 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
-
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Maps: ws -> { username, room }
+// Connect to MongoDB
+await dbConnection();
+
 const clients = new Map();
-// Maps: room -> Set of ws connections
 const rooms = new Map();
+
+app.get('/rooms', async (_, res) => {
+  try {
+    const allRooms = await Room.find({}, 'name');
+    const roomList = allRooms.map((r) => r.name);
+    res.json(roomList);
+  } catch (err) {
+    console.error('MongoDB error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 function broadcastToRoom(room, obj, exceptWs = null) {
   const msg = JSON.stringify(obj);
@@ -33,56 +46,83 @@ function broadcastToRoom(room, obj, exceptWs = null) {
 }
 
 function broadcastRoomList() {
-  const roomList = Array.from(rooms.keys());
-  const msg = JSON.stringify({ type: 'rooms', rooms: roomList });
-  for (const client of wss.clients) {
-    if (client.readyState === 1) {
-      client.send(msg);
-    }
-  }
+  Room.find({}, 'name')
+    .then((allRooms) => {
+      const roomList = allRooms.map((r) => r.name);
+      const msg = JSON.stringify({ type: 'rooms', rooms: roomList });
+      for (const client of wss.clients) {
+        if (client.readyState === 1) {
+          client.send(msg);
+        }
+      }
+    })
+    .catch((err) => console.error('MongoDB error:', err));
 }
 
 wss.on('connection', (ws) => {
-  ws.on('message', (data) => {
+  broadcastRoomList();
+
+  ws.on('message', async (data) => {
     let msg;
     try {
       msg = JSON.parse(data.toString());
     } catch {
-      console.log('Invalid JSON:', data.toString());
       return;
     }
 
     if (msg.type === 'join') {
       const { username, room } = msg;
       clients.set(ws, { username, room });
-
       if (!rooms.has(room)) rooms.set(room, new Set());
       rooms.get(room).add(ws);
 
-      ws.send(
-        JSON.stringify({
-          type: 'system',
-          text: `Welcome ${username} to room ${room}`
-        })
-      );
-      broadcastToRoom(
-        room,
-        { type: 'system', text: `${username} joined the room.` },
-        ws
-      );
-      broadcastRoomList();
+      await Room.findOne({ name: room })
+        .then(
+          async (foundRoom) => foundRoom || (await Room.create({ name: room }))
+        )
+        .then((foundRoom) => {
+          foundRoom.messages.forEach((m) => {
+            ws.send(
+              JSON.stringify({
+                type: 'chat',
+                sender: m.sender,
+                text: m.text,
+                timestamp: m.timestamp
+              })
+            );
+          });
+          ws.send(
+            JSON.stringify({
+              type: 'system',
+              text: `Welcome ${username} to room ${room}`
+            })
+          );
+          broadcastToRoom(
+            room,
+            { type: 'system', text: `${username} joined the room.` },
+            ws
+          );
+          broadcastRoomList();
+        });
     }
 
     if (msg.type === 'chat') {
       const user = clients.get(ws);
-      if (!user) {
-        ws.send(JSON.stringify({ type: 'system', text: 'Join a room first.' }));
-        return;
-      }
+      if (!user) return;
       broadcastToRoom(
         user.room,
-        { type: 'chat', sender: user.username, text: msg.text },
+        {
+          type: 'chat',
+          sender: user.username,
+          text: msg.text,
+          timestamp: new Date()
+        },
         ws
+      );
+      await Room.findOneAndUpdate(
+        { name: user.room },
+        { $push: { messages: { sender: user.username, text: msg.text } } },
+        { new: true, upsert: true }
       );
     }
   });
@@ -90,17 +130,14 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const user = clients.get(ws);
     if (user) {
-      const { room, username } = user;
-      const members = rooms.get(room);
+      const members = rooms.get(user.room);
       if (members) {
         members.delete(ws);
-        if (members.size === 0) {
-          rooms.delete(room);
-        }
+        if (members.size === 0) rooms.delete(user.room);
       }
       broadcastToRoom(
-        room,
-        { type: 'system', text: `${username} left the room.` },
+        user.room,
+        { type: 'system', text: `${user.username} left the room.` },
         ws
       );
       broadcastRoomList();
@@ -109,6 +146,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-server.listen(port, () => {
-  console.log(`🚀 Multi-room chat running at http://localhost:${port}`);
-});
+server.listen(port, () =>
+  console.log(`🚀 Server running at http://localhost:${port}`)
+);
