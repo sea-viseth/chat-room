@@ -2,52 +2,88 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Mini WebSocket Chat</title>
+  <title>Multi-Room Chat with Room List</title>
   <style>
-    body { font-family: Arial; max-width: 600px; margin: 2rem auto; }
-    #messages { border: 1px solid #ccc; padding: 1rem; height: 300px; overflow-y: auto; }
+    body { font-family: Arial; max-width: 700px; margin: 2rem auto; }
+    #roomsList div { cursor: pointer; color: blue; margin: 0.2rem 0; }
+    #roomsList div:hover { text-decoration: underline; }
+    #messages { border: 1px solid #ccc; padding: 1rem; height: 300px; overflow-y: auto; margin-top: 1rem;}
     #input { width: 80%; }
     #send { width: 18%; }
   </style>
 </head>
 <body>
-  <h1>WebSocket Chat</h1>
-  <div id="messages"></div>
-  <input id="input" placeholder="Type a message...">
-  <button id="send">Send</button>
+  <h1>Multi-Room Chat</h1>
+
+  <h3>Active Rooms</h3>
+  <div id="roomsList">(loading...)</div>
+
+  <h3>Join Room</h3>
+  <div>
+    <input id="room" placeholder="Room name (e.g. room42)">
+    <input id="username" placeholder="Username">
+    <button id="join">Join Room</button>
+  </div>
+
+  <div id="chatArea" style="display:none;">
+    <div id="messages"></div>
+    <input id="input" placeholder="Type a message...">
+    <button id="send">Send</button>
+  </div>
 
   <script>
     let ws;
-    let username;
 
-    function appendMessage(text, cls = '') {
+    function appendMessage(text) {
       const div = document.createElement('div');
       div.textContent = text;
-      if (cls) div.className = cls;
-      document.getElementById('messages').appendChild(div);
+      const msgArea = document.getElementById('messages');
+      msgArea.appendChild(div);
       div.scrollIntoView();
     }
 
-    function startChat() {
+    function updateRoomsList(rooms) {
+      const container = document.getElementById('roomsList');
+      container.innerHTML = '';
+      if (rooms.length === 0) {
+        container.textContent = '(no active rooms)';
+        return;
+      }
+      rooms.forEach(room => {
+        const div = document.createElement('div');
+        div.textContent = room;
+        div.onclick = () => document.getElementById('room').value = room;
+        container.appendChild(div);
+      });
+    }
+
+    document.getElementById('join').onclick = () => {
+      const room = document.getElementById('room').value.trim();
+      const username = document.getElementById('username').value.trim();
+      if (!room || !username) return alert('Enter room and username!');
+
       ws = new WebSocket(`ws://${location.host}`);
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'login', username }));
+        ws.send(JSON.stringify({ type: 'join', room, username }));
+        document.getElementById('chatArea').style.display = 'block';
       };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === 'system') {
-          appendMessage(`[System] ${msg.text}`, 'system');
+          appendMessage(`[System] ${msg.text}`);
         } else if (msg.type === 'chat') {
           appendMessage(`${msg.sender}: ${msg.text}`);
+        } else if (msg.type === 'rooms') {
+          updateRoomsList(msg.rooms);
         }
       };
 
       ws.onclose = () => {
-        appendMessage('[System] Disconnected from server.', 'system');
+        appendMessage('[System] Disconnected from server.');
       };
-    }
+    };
 
     document.getElementById('send').onclick = () => {
       const input = document.getElementById('input');
@@ -57,10 +93,6 @@
         input.value = '';
       }
     };
-
-    // Ask for username first
-    username = prompt('Enter your username:', `Guest${Math.floor(Math.random()*1000)}`) || `Guest${Math.floor(Math.random()*1000)}`;
-    startChat();
   </script>
 </body>
 </html>

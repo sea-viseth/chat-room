@@ -4,70 +4,111 @@ import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Setup to serve static HTML file
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
 
-// Serve static HTML
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Keep a simple map of clients to usernames
-const users = new Map();
+// Maps: ws -> { username, room }
+const clients = new Map();
+// Maps: room -> Set of ws connections
+const rooms = new Map();
 
-function broadcastJson(obj, exceptWs = null) {
+function broadcastToRoom(room, obj, exceptWs = null) {
   const msg = JSON.stringify(obj);
-  wss.clients.forEach((client) => {
-    if (client !== exceptWs && client.readyState === 1) {
+  const members = rooms.get(room);
+  if (members) {
+    for (const client of members) {
+      if (client !== exceptWs && client.readyState === 1) {
+        client.send(msg);
+      }
+    }
+  }
+}
+
+function broadcastRoomList() {
+  const roomList = Array.from(rooms.keys());
+  const msg = JSON.stringify({ type: 'rooms', rooms: roomList });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
       client.send(msg);
     }
-  });
+  }
 }
 
 wss.on('connection', (ws) => {
-  console.log('New client connected');
-
   ws.on('message', (data) => {
     let msg;
     try {
       msg = JSON.parse(data.toString());
-    } catch (e) {
-      console.log('Invalid message:', data.toString());
+    } catch {
+      console.log('Invalid JSON:', data.toString());
       return;
     }
 
-    // Handle login
-    if (msg.type === 'login') {
-      users.set(ws, msg.username);
+    if (msg.type === 'join') {
+      const { username, room } = msg;
+      clients.set(ws, { username, room });
+
+      if (!rooms.has(room)) rooms.set(room, new Set());
+      rooms.get(room).add(ws);
+
       ws.send(
-        JSON.stringify({ type: 'system', text: `Welcome ${msg.username}!` })
+        JSON.stringify({
+          type: 'system',
+          text: `Welcome ${username} to room ${room}`
+        })
       );
-      broadcastJson(
-        { type: 'system', text: `${msg.username} joined the chat.` },
+      broadcastToRoom(
+        room,
+        { type: 'system', text: `${username} joined the room.` },
         ws
       );
+      broadcastRoomList();
     }
 
-    // Handle normal chat
     if (msg.type === 'chat') {
-      const sender = users.get(ws) || 'Anonymous';
-      broadcastJson({ type: 'chat', sender, text: msg.text }, ws);
+      const user = clients.get(ws);
+      if (!user) {
+        ws.send(JSON.stringify({ type: 'system', text: 'Join a room first.' }));
+        return;
+      }
+      broadcastToRoom(
+        user.room,
+        { type: 'chat', sender: user.username, text: msg.text },
+        ws
+      );
     }
   });
 
   ws.on('close', () => {
-    const name = users.get(ws) || 'A user';
-    console.log(`${name} disconnected`);
-    broadcastJson({ type: 'system', text: `${name} left the chat.` }, ws);
-    users.delete(ws);
+    const user = clients.get(ws);
+    if (user) {
+      const { room, username } = user;
+      const members = rooms.get(room);
+      if (members) {
+        members.delete(ws);
+        if (members.size === 0) {
+          rooms.delete(room);
+        }
+      }
+      broadcastToRoom(
+        room,
+        { type: 'system', text: `${username} left the room.` },
+        ws
+      );
+      broadcastRoomList();
+    }
+    clients.delete(ws);
   });
 });
 
 server.listen(port, () => {
-  console.log(`🚀 Chat server running at http://localhost:${port}`);
+  console.log(`🚀 Multi-room chat running at http://localhost:${port}`);
 });
