@@ -34,14 +34,13 @@ app.get('/rooms', async (_, res) => {
   }
 });
 
-function broadcastToRoom(room, obj, exceptWs = null) {
-  const msg = JSON.stringify(obj);
+function broadcastToRoom(room, message, exceptWs) {
   const members = rooms.get(room);
-  if (members) {
-    for (const client of members) {
-      if (client !== exceptWs && client.readyState === 1) {
-        client.send(msg);
-      }
+  if (!members) return;
+
+  for (const [_, clientWs] of members.entries()) {
+    if (clientWs.readyState === 1 && clientWs !== exceptWs) {
+      clientWs.send(JSON.stringify(message));
     }
   }
 }
@@ -59,26 +58,19 @@ function broadcastRoomList() {
     })
     .catch((err) => console.error('MongoDB error:', err));
 }
-function getOnlineUsersInRoom(room) {
-  const usernames = new Set();
-  for (const [client, data] of clients.entries()) {
-    if (data.room === room) {
-      usernames.add(data.username);
-    }
-  }
-  return Array.from(usernames);
-}
 
 function broadcastOnlineList(room) {
-  const onlineUsers = getOnlineUsersInRoom(room);
-  const msg = JSON.stringify({ type: 'online', users: onlineUsers });
   const members = rooms.get(room);
-  if (members) {
-    for (const client of members) {
-      if (client.readyState === 1) {
-        client.send(msg);
-      }
-    }
+  if (!members) return;
+
+  const usernames = [...members.keys()];
+  for (const [__filename, clientWs] of members.entries()) {
+    clientWs.send(
+      JSON.stringify({
+        type: 'online',
+        users: usernames
+      })
+    );
   }
 }
 
@@ -95,9 +87,23 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'join') {
       const { username, room } = msg;
+      for (const [roomName, members] of rooms.entries()) {
+        if (members.has(username)) {
+          members.delete(username);
+
+          broadcastOnlineList(roomName);
+          broadcastToRoom(roomName, {
+            type: 'system',
+            text: `${username} left the room.`
+          });
+
+          if (members.size === 0) {
+            rooms.delete(roomName);
+          }
+        }
+      }
+
       clients.set(ws, { username, room });
-      broadcastOnlineList(room);
-      // Save user in DB if not exists
       await User.findOneAndUpdate(
         { username },
         {},
@@ -105,8 +111,10 @@ wss.on('connection', (ws) => {
       ).catch((err) => console.error('MongoDB user upsert error:', err));
 
       // Rooms logic
-      if (!rooms.has(room)) rooms.set(room, new Set());
-      rooms.get(room).add(ws);
+      if (!rooms.has(room)) {
+        rooms.set(room, new Map());
+      }
+      rooms.get(room).set(username, ws);
 
       await Room.findOne({ name: room })
         .then(
@@ -130,7 +138,9 @@ wss.on('connection', (ws) => {
               text: `Welcome ${username} to room ${room}`
             })
           );
+
           broadcastRoomList();
+          broadcastOnlineList(room);
         });
     }
 
