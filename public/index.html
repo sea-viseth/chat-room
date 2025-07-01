@@ -152,6 +152,11 @@
         .then(updateRoomsList)
         .catch((err) => console.error('Error loading rooms:', err));
 
+      function clearChat() {
+        const msgArea = document.getElementById('messages');
+        msgArea.innerHTML = '';
+      }
+
       // Join room using fixed username
       document.getElementById('join').onclick = () => {
         const room = document.getElementById('room').value.trim();
@@ -163,6 +168,7 @@
         ws.onopen = () => {
           ws.send(JSON.stringify({ type: 'join', room, username }));
           document.getElementById('chatArea').style.display = 'block';
+          clearChat();
         };
 
         ws.onmessage = (event) => {
@@ -180,7 +186,7 @@
           } else if (msg.type === 'online') {
             console.log('Online users:', msg.users);
             document.getElementById('onlineUsers').textContent =
-              'Online in room: ' + msg.users.join(', ');
+              'Online users: ' + msg.users.join(', ');
           }
         };
 

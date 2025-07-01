@@ -130,11 +130,6 @@ wss.on('connection', (ws) => {
               text: `Welcome ${username} to room ${room}`
             })
           );
-          broadcastToRoom(
-            room,
-            { type: 'system', text: `${username} joined the room.` },
-            ws
-          );
           broadcastRoomList();
         });
     }
