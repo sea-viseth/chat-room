@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dbConnection from './db/connection.js';
 import Room from './db/models/Room.js';
+import User from './db/models/User.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -58,6 +59,28 @@ function broadcastRoomList() {
     })
     .catch((err) => console.error('MongoDB error:', err));
 }
+function getOnlineUsersInRoom(room) {
+  const usernames = new Set();
+  for (const [client, data] of clients.entries()) {
+    if (data.room === room) {
+      usernames.add(data.username);
+    }
+  }
+  return Array.from(usernames);
+}
+
+function broadcastOnlineList(room) {
+  const onlineUsers = getOnlineUsersInRoom(room);
+  const msg = JSON.stringify({ type: 'online', users: onlineUsers });
+  const members = rooms.get(room);
+  if (members) {
+    for (const client of members) {
+      if (client.readyState === 1) {
+        client.send(msg);
+      }
+    }
+  }
+}
 
 wss.on('connection', (ws) => {
   broadcastRoomList();
@@ -73,6 +96,15 @@ wss.on('connection', (ws) => {
     if (msg.type === 'join') {
       const { username, room } = msg;
       clients.set(ws, { username, room });
+      broadcastOnlineList(room);
+      // Save user in DB if not exists
+      await User.findOneAndUpdate(
+        { username },
+        {},
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      ).catch((err) => console.error('MongoDB user upsert error:', err));
+
+      // Rooms logic
       if (!rooms.has(room)) rooms.set(room, new Set());
       rooms.get(room).add(ws);
 
@@ -87,7 +119,8 @@ wss.on('connection', (ws) => {
                 type: 'chat',
                 sender: m.sender,
                 text: m.text,
-                timestamp: m.timestamp
+                timestamp: m.timestamp,
+                owner: m.sender === username
               })
             );
           });
@@ -109,6 +142,7 @@ wss.on('connection', (ws) => {
     if (msg.type === 'chat') {
       const user = clients.get(ws);
       if (!user) return;
+      broadcastOnlineList(user.room);
       broadcastToRoom(
         user.room,
         {
