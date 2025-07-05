@@ -1,222 +1,622 @@
+<!-- chat-room-master/public/index.html -->
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Multi-Room Chat with Room List</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mini WebSocket Chat</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
+      /* CSS Variables for easier theme management and consistency */
+      :root {
+        --primary-color: #4a90e2; /* A slightly softer, more modern blue */
+        --secondary-color: #dcdcdc; /* Lighter grey for borders/subtle text */
+        --background-color: #f0f2f5; /* Light grey background for the body */
+        --chat-bg-color: #ffffff; /* White for the main chat box */
+        --my-message-bg: #eaf4ff; /* Very light blue for "You" messages */
+        --other-message-bg: #ececec; /* Light grey for others' messages */
+        --system-message-color: #8a2be2; /* A vibrant purple for system messages */
+        --whisper-message-bg: #fff3cd; /* Light yellow for whispers */
+        --whisper-message-color: #856404; /* Darker yellow/brown for whisper text */
+        --border-radius: 12px; /* Slightly more rounded containers */
+        --message-radius: 20px; /* Even more rounded for individual messages */
+        --box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1); /* Deeper, softer shadow */
+        --font-family: 'Inter', Arial, sans-serif;
+
+        /* Fallback for --vh, will be overridden by JS for true viewport height on mobile */
+        --vh: 1vh;
+      }
+
       body {
-        font-family: Arial;
-        max-width: 700px;
-        min-width: none;
-        margin: 2rem auto;
-      }
-      .container {
-        width: 100%;
-        margin: 0 5%;
-      }
-      #roomsList div {
-        cursor: pointer;
-        color: blue;
-        margin: 0.2rem 0;
-      }
-      #roomsList div:hover {
-        text-decoration: underline;
-      }
-      #messages {
-        border: 1px solid #ccc;
+        font-family: var(--font-family);
+        background-color: var(--background-color);
+        display: flex;
+        justify-content: center; /* Center horizontally */
+        /* Removed align-items: center; to allow the chat container to take full height on mobile if needed */
+        min-height: 100vh; /* Fallback for browsers not supporting --vh */
+        min-height: calc(var(--vh, 1vh) * 100); /* Use JS-calculated vh */
+        margin: 0;
         padding: 1rem;
-        height: 300px;
+        box-sizing: border-box; /* Include padding in element's total width and height */
+        /* Changed to auto to allow scrolling if content overflows, especially on mobile */
         overflow-y: auto;
-        margin-top: 1rem;
+        overflow-x: hidden; /* Prevent horizontal scroll */
       }
-      #input {
-        width: 80%;
-      }
-      #send {
-        width: 18%;
-      }
-      #messages {
+
+      /* Main container for the entire chat interface */
+      #chat-container {
+        max-width: 600px;
+        width: 100%; /* Make it responsive up to max-width */
+        background-color: var(--chat-bg-color);
+        border-radius: var(--border-radius);
+        box-shadow: var(--box-shadow);
+        padding: 1.5rem;
         display: flex;
         flex-direction: column;
-        border: 1px solid #ccc;
+        gap: 1rem; /* Spacing between sections (header, messages, input) */
+
+        /* Responsive height using --vh, allows the chat box to fit various screen heights */
+        height: 95vh; /* Fallback for browsers not supporting --vh */
+        height: calc(var(--vh, 1vh) * 95); /* Use JS-calculated vh */
+        max-height: 800px; /* Max height on larger screens */
+        margin: 0 auto; /* Center horizontally */
+        position: relative; /* Needed for absolute positioning of suggestions */
+      }
+
+      h1 {
+        text-align: center;
+        color: #343a40; /* Darker grey for heading */
+        margin-top: 0;
+        margin-bottom: 0.5rem; /* Reduced margin */
+        font-size: 1.9rem; /* Slightly larger heading */
+        font-weight: 700;
+      }
+
+      /* Status indicator below the title */
+      #status-indicator {
+        text-align: center;
+        font-size: 0.8rem;
+        color: var(--secondary-color);
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+      }
+      #status-indicator.connected {
+        color: #28a745; /* Green for connected */
+      }
+      #status-indicator.disconnected {
+        color: #dc3545; /* Red for disconnected */
+      }
+
+      #messages {
+        flex-grow: 1; /* Messages area takes up available space */
+        min-height: 150px; /* Minimum height even with few messages */
+        /* Removed fixed max-height, flex-grow handles it within the flex container */
+        background-color: #fdfdfd; /* Slightly different background for messages area */
         padding: 1rem;
-        height: 300px;
         overflow-y: auto;
+        border-radius: var(--border-radius);
+        display: flex;
+        flex-direction: column; /* Ensure messages stack vertically */
+        gap: 0.75rem; /* Increased space between individual messages */
+        border: 1px solid var(--secondary-color); /* Subtle border */
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.03); /* Subtle inner shadow */
+      }
+
+      /* General styling for each message bubble */
+      #messages > div {
+        padding: 0.75rem 1rem;
+        border-radius: var(
+          --message-radius
+        ); /* More rounded corners for individual messages */
+        max-width: 80%; /* Messages don't span full width, leave space for align */
+        word-wrap: break-word; /* Ensure long words wrap correctly */
+        line-height: 1.4; /* Better line spacing */
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); /* Subtle shadow for message bubbles */
+      }
+
+      /* Styling for messages from other users (public chat) */
+      #messages > div:not(.my-message):not(.system):not(.whisper) {
+        background-color: var(--other-message-bg);
+        align-self: flex-start; /* Align to the left */
+        color: #333; /* Dark text */
+        border-bottom-left-radius: 4px; /* Slight "tail" effect */
+      }
+      #messages > div:not(.my-message):not(.system):not(.whisper) strong {
+        color: #0056b3; /* Darker blue for sender name */
+      }
+
+      /* Styling for messages sent by "You" (public chat) */
+      .my-message {
+        background-color: var(--my-message-bg);
+        align-self: flex-end; /* Align to the right */
+        color: #222; /* Slightly darker text */
+        border-bottom-right-radius: 4px; /* Slight "tail" effect */
+      }
+      .my-message strong {
+        color: var(--primary-color); /* Primary color for "You" sender name */
+      }
+
+      /* Styling for system messages */
+      .system {
+        font-style: italic;
+        color: var(--system-message-color);
+        text-align: center;
+        align-self: center; /* Center align system messages */
+        background: none; /* No background for system messages */
+        border: none;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.85rem; /* Slightly smaller for system messages */
+        font-weight: 500;
+        box-shadow: none; /* No shadow for system messages */
+        max-width: 95%; /* Allow system messages to span more width */
+      }
+
+      /* Styling for whisper messages */
+      .whisper {
+        background-color: var(--whisper-message-bg);
+        color: var(--whisper-message-color);
+        border: 1px solid rgba(255, 193, 7, 0.5); /* Yellow border */
+        font-style: italic;
+      }
+      .whisper strong {
+        color: #b8860b; /* Darker yellow for sender name in whisper */
+      }
+      /* Align whispers based on sender */
+      .whisper.my-whisper {
+        align-self: flex-end;
+        border-bottom-right-radius: 4px;
+      }
+      .whisper.other-whisper {
+        align-self: flex-start;
+        border-bottom-left-radius: 4px;
+      }
+
+      /* Wrapper for the input field and send button */
+      .input-area {
+        display: flex;
+        gap: 0.75rem; /* Space between input and button */
+        align-items: center; /* Vertically align items in the input area */
+        position: relative; /* For positioning suggestions relative to input */
+      }
+
+      #input {
+        flex-grow: 1; /* Take up available space in the flex container */
+        padding: 0.85rem 1.1rem; /* Slightly more padding */
+        border: 1px solid #ced4da; /* Light grey border */
+        border-radius: var(--border-radius);
+        font-size: 1rem;
+        outline: none; /* Remove default browser focus outline */
+        transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+      }
+
+      #input:focus {
+        border-color: var(--primary-color); /* Highlight border on focus */
+        box-shadow: 0 0 0 0.2rem rgba(74, 144, 226, 0.25); /* Subtle shadow on focus */
+      }
+
+      #send {
+        padding: 0.85rem 1.4rem; /* Slightly more padding */
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: var(--border-radius);
+        cursor: pointer;
+        font-size: 1rem;
+        font-weight: 500;
+        transition: background-color 0.2s ease-in-out,
+          transform 0.1s ease-in-out, opacity 0.2s ease-in-out;
+        min-width: 90px; /* Ensure button has minimum width */
+      }
+
+      #send:hover {
+        background-color: #3a7bd5; /* Darker blue on hover */
+      }
+
+      #send:active {
+        transform: translateY(1px); /* Slight press effect on click */
+      }
+
+      /* Disable states for input and button */
+      #input:disabled {
+        background-color: #e9ecef;
+        cursor: not-allowed;
+      }
+
+      #send:disabled {
+        background-color: #a0c4ff; /* Lighter primary color when disabled */
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
+
+      /* Custom scrollbar styling for WebKit browsers (Chrome, Safari) */
+      #messages::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      #messages::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 10px;
+      }
+
+      #messages::-webkit-scrollbar-thumb {
+        background: #ccc;
+        border-radius: 10px;
+      }
+
+      #messages::-webkit-scrollbar-thumb:hover {
+        background: #999;
+      }
+
+      /* User suggestions for mentions */
+      #user-suggestions {
+        position: absolute;
+        bottom: 100%; /* Position above the input area */
+        left: 0;
+        right: 0;
+        background-color: var(--chat-bg-color);
+        border: 1px solid var(--secondary-color);
+        border-radius: var(--border-radius);
+        box-shadow: var(--box-shadow);
+        max-height: 200px;
+        overflow-y: auto;
+        z-index: 10; /* Ensure it's on top of other elements */
+        margin-bottom: 0.5rem; /* Space between suggestions and input */
+        display: none; /* Hidden by default */
+        padding: 0.5rem 0;
+      }
+
+      #user-suggestions div {
+        padding: 0.75rem 1rem;
+        cursor: pointer;
+        transition: background-color 0.2s ease;
+        font-size: 0.95rem;
+        color: #333;
+      }
+
+      #user-suggestions div:hover {
+        background-color: var(--my-message-bg);
+      }
+
+      /* Media Queries for better responsiveness */
+      @media (max-width: 768px) {
+        body {
+          padding: 0; /* Remove padding on body for full screen on mobile */
+        }
+        #chat-container {
+          border-radius: 0; /* No border-radius on full-width mobile */
+          box-shadow: none; /* No shadow on full-width mobile */
+          padding: 1rem; /* Slightly less padding inside */
+          height: 100vh; /* Fallback */
+          height: calc(var(--vh, 1vh) * 100); /* Use 100% of corrected vh */
+          max-height: none; /* Remove max-height constraint */
+          margin: 0; /* Remove auto margin to stretch fully */
+        }
+        h1 {
+          font-size: 1.6rem; /* Slightly smaller title on mobile */
+        }
+        #messages {
+          padding: 0.75rem; /* Less padding for messages area */
+          gap: 0.6rem; /* Slightly less gap between messages */
+          /* max-height no longer needed, flex-grow handles it */
+        }
+        #messages > div {
+          padding: 0.6rem 0.8rem; /* Smaller padding for message bubbles */
+          font-size: 0.9rem;
+        }
+        #input {
+          padding: 0.6rem 0.9rem; /* Smaller padding for input */
+          font-size: 0.95rem;
+        }
+        #send {
+          padding: 0.6rem 1.1rem; /* Smaller padding for send button */
+          font-size: 0.95rem;
+          min-width: 70px;
+        }
       }
     </style>
   </head>
   <body>
-    <div class="container">
-      <h1>Multi-Room Chat</h1>
-
-      <h3>Active Rooms</h3>
-      <div id="roomsList">(loading...)</div>
-
-      <h3>Join Room</h3>
-      <div>
-        <input id="room" placeholder="Room name (e.g. room42)" />
-        <span
-          id="fixedUsername"
-          style="font-weight: bold; margin-left: 1rem; color: green"
-        ></span>
-        <button id="join">Join Room</button>
-        <button onclick="resetUsername()">Change username</button>
-      </div>
-
-      <div id="chatArea" style="display: none">
-        <div id="messages"></div>
-        <div
-          id="onlineUsers"
-          style="margin-top: 1rem; font-size: 0.9em; color: #555"
-        ></div>
-        <textarea
-          id="input"
-          placeholder="Type a message..."
-          rows="5"
-          style="width: 100%; resize: vertical"
-        ></textarea>
-        <button id="send" type="submit">Send</button>
+    <!-- Added a container div for better styling of the whole chat interface -->
+    <div id="chat-container">
+      <h1>WebSocket Chat</h1>
+      <div id="status-indicator">Connecting...</div>
+      <!-- New status indicator -->
+      <div id="messages"></div>
+      <div class="input-area">
+        <!-- Wrapper for input and button for flex layout -->
+        <div id="user-suggestions"></div>
+        <!-- Suggestions box -->
+        <input id="input" placeholder="Type a message..." disabled />
+        <!-- Disabled initially -->
+        <button id="send" disabled>Send</button>
+        <!-- Disabled initially -->
       </div>
     </div>
 
     <script>
+      // Fix for 100vh on mobile browsers (address bar hiding/showing)
+      function setVhProperty() {
+        const vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+      }
+      window.addEventListener('resize', setVhProperty);
+      window.addEventListener('orientationchange', setVhProperty);
+      setVhProperty(); // Initial call on page load
+
       let ws;
-      let username = null;
+      let username;
+      const messagesDiv = document.getElementById('messages');
+      const inputField = document.getElementById('input');
+      const sendButton = document.getElementById('send');
+      const statusIndicator = document.getElementById('status-indicator');
+      const userSuggestionsDiv = document.getElementById('user-suggestions');
 
-      function appendMessage(text, owner) {
-        const div = document.createElement('div');
-        div.textContent = text;
+      let activeUsers = new Set(); // Store active usernames for suggestions
 
-        div.style.padding = '6px 12px';
-        div.style.margin = '4px 0';
-        div.style.borderRadius = '12px';
-        div.style.maxWidth = '60%';
-
-        if (owner) {
-          div.style.alignSelf = 'flex-end';
-          div.style.backgroundColor = '#dcf8c6'; // light green like WhatsApp
+      function setConnectionStatus(status, text) {
+        statusIndicator.className = status;
+        statusIndicator.textContent = text;
+        if (status === 'connected') {
+          inputField.disabled = false;
+          sendButton.disabled = false;
         } else {
-          div.style.alignSelf = 'flex-start';
-          div.style.backgroundColor = '#f1f0f0'; // light grey
+          inputField.disabled = true;
+          sendButton.disabled = true;
         }
-
-        const msgArea = document.getElementById('messages');
-        msgArea.appendChild(div);
-        div.scrollIntoView();
       }
 
-      function updateRoomsList(rooms) {
-        const container = document.getElementById('roomsList');
-        container.innerHTML = '';
-        if (rooms.length === 0) {
-          container.textContent = '(no rooms yet)';
-          return;
-        }
-        rooms.forEach((room) => {
-          const div = document.createElement('div');
-          div.textContent = room;
-          div.onclick = () => (document.getElementById('room').value = room);
-          container.appendChild(div);
-        });
-      }
+      function appendMessage(sender, text, type = 'chat', target = null) {
+        const div = document.createElement('div');
+        let messageContent;
 
-      // ✅ Get username once on load
-      function askUsername() {
-        username = localStorage.getItem('username');
-        if (!username) {
-          while (!username) {
-            const input = prompt(
-              'Enter your username (will be saved for future visits):'
-            );
-            if (input && input.trim().length > 0) {
-              username = input.trim();
-            }
+        if (type === 'system') {
+          messageContent = `[System] ${text}`;
+          div.className = 'system';
+        } else if (type === 'whisper') {
+          div.className = 'whisper';
+          if (sender === username) {
+            // If *we* sent this whisper (either directly or echoed from server)
+            messageContent = `<strong>You whispered to ${target}:</strong> ${text}`;
+            div.classList.add('my-whisper');
+          } else {
+            // If someone else whispered to us
+            messageContent = `<strong>${sender} whispered to You:</strong> ${text}`;
+            div.classList.add('other-whisper');
           }
-          localStorage.setItem('username', username);
+        } else {
+          // type === 'chat' (public message)
+          messageContent = `<strong>${sender}:</strong> ${text}`;
+          if (sender === username) {
+            // If *we* sent this public message
+            div.className = 'my-message';
+          }
         }
-        document.getElementById(
-          'fixedUsername'
-        ).textContent = `as "${username}"`;
+        div.innerHTML = messageContent;
+        messagesDiv.appendChild(div);
+
+        // Added smooth scroll behavior for a better user experience
+        div.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }
 
-      function resetUsername() {
-        localStorage.removeItem('username');
-        askUsername();
-      }
-
-      askUsername(); // run on load
-
-      // ✅ Fetch rooms on load
-      fetch('/rooms')
-        .then((res) => res.json())
-        .then(updateRoomsList)
-        .catch((err) => console.error('Error loading rooms:', err));
-
-      function clearChat() {
-        const msgArea = document.getElementById('messages');
-        msgArea.innerHTML = '';
-      }
-
-      // Join room using fixed username
-      document.getElementById('join').onclick = () => {
-        const room = document.getElementById('room').value.trim();
-        if (!room) return alert('Enter room name!');
-        if (!username) return alert('Missing username.');
-
-        ws = new WebSocket(`ws://${location.host}`);
+      function startChat() {
+        setConnectionStatus('connecting', 'Connecting...');
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${location.host}`);
 
         ws.onopen = () => {
-          ws.send(JSON.stringify({ type: 'join', room, username }));
-          document.getElementById('chatArea').style.display = 'block';
-          clearChat();
+          // Send login message immediately after connection opens
+          // The server will then confirm and send back the user list
+          if (username) {
+            ws.send(JSON.stringify({ type: 'login', username }));
+          } else {
+            // Should not happen with the prompt loop, but as a fallback
+            setConnectionStatus('connected', 'Connected (Login Pending)');
+            document.title = `Chat | Login...`;
+          }
         };
 
         ws.onmessage = (event) => {
           const msg = JSON.parse(event.data);
           if (msg.type === 'system') {
-            appendMessage(`[System] ${msg.text}`);
+            appendMessage('System', msg.text, 'system');
+            if (msg.text.includes('Welcome')) {
+              // A successful login message
+              setConnectionStatus('connected', `Connected as ${username}`);
+              document.title = `Chat | ${username}`;
+            } else if (
+              msg.text.includes('Username') &&
+              msg.text.includes('already taken')
+            ) {
+              // Handle duplicate username case, prompt again or disconnect
+              alert(msg.text);
+              location.reload(); // Reload to re-prompt for username
+            }
           } else if (msg.type === 'chat') {
-            if (msg.owner) {
-              appendMessage(`${msg.text}`, true);
-            } else {
-              appendMessage(`${msg.sender}: ${msg.text}`, false);
+            // Only append if it's not our own message (we append our own immediately on send)
+            // This prevents duplicate messages if the server *were* to echo back the sender's own public message.
+            if (msg.sender !== username) {
+              appendMessage(msg.sender, msg.text, 'chat');
             }
-          } else if (msg.type === 'rooms') {
-            updateRoomsList(msg.rooms);
-          } else if (msg.type === 'online') {
-            console.log('Online users:', msg.users);
-            document.getElementById('onlineUsers').textContent =
-              'Online user in room: ' + msg.users.join(', ');
+          } else if (msg.type === 'whisper') {
+            // Whispers are received by target and sender. appendMessage handles styling for sender/receiver.
+            appendMessage(msg.sender, msg.text, 'whisper', msg.target);
+          } else if (msg.type === 'user_list') {
+            activeUsers = new Set(msg.users);
+            console.log('Active users:', Array.from(activeUsers));
+          } else if (msg.type === 'user_joined') {
+            activeUsers.add(msg.username);
+            console.log(
+              `${msg.username} joined. Active users:`,
+              Array.from(activeUsers)
+            );
+          } else if (msg.type === 'user_left') {
+            activeUsers.delete(msg.username);
+            console.log(
+              `${msg.username} left. Active users:`,
+              Array.from(activeUsers)
+            );
           }
         };
 
-        ws.onclose = () => {
-          appendMessage('[System] Disconnected from server.');
+        ws.onclose = (event) => {
+          let reason = 'Disconnected from server.';
+          if (event.code === 1000) reason += ' (Normal closure)';
+          else if (event.code === 1001) reason += ' (Going away)';
+          else
+            reason += ` (Code: ${event.code}, Reason: ${
+              event.reason || 'No reason'
+            })`;
+          setConnectionStatus('disconnected', reason);
+          appendMessage('System', reason, 'system');
+          document.title = `Chat | Disconnected`;
+          activeUsers.clear(); // Clear user list on disconnect
         };
-      };
 
-      document.getElementById('send').onclick = () => {
-        const input = document.getElementById('input');
-        if (input.value && ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'chat', text: input.value }));
-          appendMessage(`${input.value}`, true);
-          input.value = '';
+        ws.onerror = (error) => {
+          console.error('WebSocket Error:', error);
+          setConnectionStatus(
+            'disconnected',
+            `WebSocket error: ${error.message || 'Unknown error'}`
+          );
+          appendMessage(
+            'System',
+            `WebSocket error: ${error.message || 'Unknown error'}`,
+            'system'
+          );
+          document.title = `Chat | Error`;
+        };
+      }
+
+      sendButton.onclick = () => {
+        const messageText = inputField.value.trim();
+        if (!messageText || !ws || ws.readyState !== WebSocket.OPEN) {
+          return;
         }
+
+        // Check for mention syntax to send a whisper
+        const mentionMatch = messageText.match(/^@(\w+)\s(.+)/);
+
+        if (mentionMatch) {
+          const targetUsername = mentionMatch[1];
+          // The actual message content after the @username and a space
+          const actualMessage = mentionMatch[2];
+
+          if (targetUsername === username) {
+            appendMessage(
+              'System',
+              'You cannot whisper to yourself. Use public chat.',
+              'system'
+            );
+          } else if (activeUsers.has(targetUsername)) {
+            // Send the full message string (e.g., "@Bob Hello") to the server as 'chat' type.
+            // The server is responsible for parsing it and handling the whisper logic.
+            ws.send(JSON.stringify({ type: 'chat', text: messageText }));
+            // *** IMPORTANT: We DO NOT append the client's own whisper immediately here. ***
+            // We wait for the server to echo it back to us via ws.onmessage.
+            // This ensures no duplicates for the sender.
+          } else {
+            appendMessage(
+              'System',
+              `User "${targetUsername}" is not online or does not exist.`,
+              'system'
+            );
+          }
+        } else {
+          // Normal public chat
+          ws.send(JSON.stringify({ type: 'chat', text: messageText }));
+          // Append client's own public message immediately for better perceived responsiveness
+          appendMessage(username, messageText, 'chat');
+        }
+        inputField.value = '';
+        userSuggestionsDiv.style.display = 'none'; // Hide suggestions after sending
       };
 
-      document
-        .getElementById('input')
-        .addEventListener('keydown', function (event, data) {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault(); // prevent adding newline
-            const input = document.getElementById('input');
-            if (input.value && ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'chat', text: input.value }));
-              appendMessage(`${input.value}`, true);
-              input.value = '';
-            }
-          }
+      // Allow sending message with Enter key press
+      inputField.addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') {
+          sendButton.click(); // Simulate a click on the send button
+        }
+      });
+
+      // Mention / Autocomplete Logic
+      inputField.addEventListener('input', () => {
+        const value = inputField.value;
+        const atIndex = value.lastIndexOf('@');
+
+        // Show suggestions only if '@' is present, is at the beginning or after a space,
+        // and is followed by at least one character (not just '@ ')
+        if (
+          atIndex !== -1 &&
+          (atIndex === 0 || value[atIndex - 1] === ' ') &&
+          atIndex + 1 < value.length &&
+          value[atIndex + 1] !== ' '
+        ) {
+          const searchTerm = value.substring(atIndex + 1).toLowerCase();
+          const suggestions = Array.from(activeUsers)
+            .filter(
+              (user) =>
+                user.toLowerCase().startsWith(searchTerm) && user !== username
+            ) // Exclude self
+            .sort(); // Alphabetical sort for consistent order
+
+          displaySuggestions(suggestions);
+        } else {
+          userSuggestionsDiv.style.display = 'none';
+        }
+      });
+
+      function displaySuggestions(suggestions) {
+        userSuggestionsDiv.innerHTML = '';
+        if (suggestions.length === 0) {
+          userSuggestionsDiv.style.display = 'none';
+          return;
+        }
+
+        suggestions.forEach((user) => {
+          const suggestionItem = document.createElement('div');
+          suggestionItem.textContent = user;
+          suggestionItem.addEventListener('click', () => {
+            const value = inputField.value;
+            const atIndex = value.lastIndexOf('@');
+            // Replace the current content after '@' with the selected username + a space
+            inputField.value = value.substring(0, atIndex) + `@${user} `;
+            userSuggestionsDiv.style.display = 'none';
+            inputField.focus(); // Keep focus on the input field after selection
+          });
+          userSuggestionsDiv.appendChild(suggestionItem);
         });
+        userSuggestionsDiv.style.display = 'block';
+      }
+
+      // Hide suggestions if clicking outside the input field or the suggestion box
+      document.addEventListener('click', (event) => {
+        if (
+          !inputField.contains(event.target) &&
+          !userSuggestionsDiv.contains(event.target)
+        ) {
+          userSuggestionsDiv.style.display = 'none';
+        }
+      });
+
+      // Ask for username first and ensure it's not empty
+      let tempUsername;
+      do {
+        tempUsername = prompt(
+          'Enter your username:',
+          `Guest${Math.floor(Math.random() * 1000)}`
+        );
+        // If user clicks cancel (tempUsername is null), set a default guest username
+        if (tempUsername === null) {
+          username = `Guest${Math.floor(Math.random() * 1000)}`;
+          break;
+        }
+        username = tempUsername.trim(); // Trim whitespace from username
+      } while (!username); // Loop until username is not empty or just whitespace
+
+      startChat();
     </script>
   </body>
 </html>

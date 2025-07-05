@@ -3,188 +3,154 @@ import http from 'http';
 import { WebSocketServer } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import dbConnection from './db/connection.js';
-import Room from './db/models/Room.js';
-import User from './db/models/User.js';
 
+// Setup to serve static HTML file
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = 3000;
 
+// Serve static HTML
 app.use(express.static(path.join(__dirname, 'public')));
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Connect to MongoDB
-await dbConnection();
+// Keep a simple map of clients to usernames (WebSocket -> username)
+const users = new Map();
+// Keep a reverse map for easy lookup (username -> WebSocket) for whispers
+const usernameToWsMap = new Map();
 
-const clients = new Map();
-const rooms = new Map();
+// Helper to get current list of active usernames
+function getActiveUsernames() {
+  return Array.from(users.values());
+}
 
-app.get('/rooms', async (_, res) => {
-  try {
-    const allRooms = await Room.find({}, 'name');
-    const roomList = allRooms.map((r) => r.name);
-    res.json(roomList);
-  } catch (err) {
-    console.error('MongoDB error:', err);
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
-});
-
-function broadcastToRoom(room, message, exceptWs) {
-  const members = rooms.get(room);
-  if (!members) return;
-
-  for (const [_, clientWs] of members.entries()) {
-    if (clientWs.readyState === 1 && clientWs !== exceptWs) {
-      clientWs.send(JSON.stringify(message));
+// Function to broadcast JSON messages to all clients, optionally excluding one
+function broadcastJson(obj, exceptWs = null) {
+  const msg = JSON.stringify(obj);
+  wss.clients.forEach((client) => {
+    if (client !== exceptWs && client.readyState === 1) {
+      client.send(msg);
     }
-  }
+  });
 }
 
-function broadcastRoomList() {
-  Room.find({}, 'name')
-    .then((allRooms) => {
-      const roomList = allRooms.map((r) => r.name);
-      const msg = JSON.stringify({ type: 'rooms', rooms: roomList });
-      for (const client of wss.clients) {
-        if (client.readyState === 1) {
-          client.send(msg);
-        }
-      }
-    })
-    .catch((err) => console.error('MongoDB error:', err));
-}
-
-function broadcastOnlineList(room) {
-  const members = rooms.get(room);
-  if (!members) return;
-
-  const usernames = [...members.keys()];
-  for (const [__filename, clientWs] of members.entries()) {
-    clientWs.send(
-      JSON.stringify({
-        type: 'online',
-        users: usernames
-      })
-    );
+// Function to send a JSON message to a specific WebSocket client
+function sendJsonToWs(ws, obj) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(obj));
   }
 }
 
 wss.on('connection', (ws) => {
-  broadcastRoomList();
+  console.log('New client connected');
 
-  ws.on('message', async (data) => {
+  ws.on('message', (data) => {
     let msg;
     try {
       msg = JSON.parse(data.toString());
-    } catch {
+    } catch (e) {
+      console.log('Invalid message:', data.toString());
       return;
     }
 
-    if (msg.type === 'join') {
-      const { username, room } = msg;
-      for (const [roomName, members] of rooms.entries()) {
-        if (members.has(username)) {
-          members.delete(username);
-
-          broadcastOnlineList(roomName);
-          broadcastToRoom(roomName, {
-            type: 'system',
-            text: `${username} left the room.`
-          });
-
-          if (members.size === 0) {
-            rooms.delete(roomName);
-          }
-        }
-      }
-
-      clients.set(ws, { username, room });
-      await User.findOneAndUpdate(
-        { username },
-        {},
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      ).catch((err) => console.error('MongoDB user upsert error:', err));
-
-      // Rooms logic
-      if (!rooms.has(room)) {
-        rooms.set(room, new Map());
-      }
-      rooms.get(room).set(username, ws);
-
-      await Room.findOne({ name: room })
-        .then(
-          async (foundRoom) => foundRoom || (await Room.create({ name: room }))
-        )
-        .then((foundRoom) => {
-          foundRoom.messages.forEach((m) => {
-            ws.send(
-              JSON.stringify({
-                type: 'chat',
-                sender: m.sender,
-                text: m.text,
-                timestamp: m.timestamp,
-                owner: m.sender === username
-              })
-            );
-          });
-          ws.send(
-            JSON.stringify({
-              type: 'system',
-              text: `Welcome ${username} to room ${room}`
-            })
-          );
-
-          broadcastRoomList();
-          broadcastOnlineList(room);
+    // Handle login
+    if (msg.type === 'login') {
+      const username = msg.username;
+      // Basic check for unique username (optional, could be more robust)
+      if (usernameToWsMap.has(username)) {
+        sendJsonToWs(ws, {
+          type: 'system',
+          text: `Username "${username}" is already taken. Please choose another.`
         });
-    }
+        ws.close(); // Close connection for duplicate username
+        return;
+      }
 
-    if (msg.type === 'chat') {
-      const user = clients.get(ws);
-      if (!user) return;
-      broadcastOnlineList(user.room);
-      broadcastToRoom(
-        user.room,
-        {
-          type: 'chat',
-          sender: user.username,
-          text: msg.text,
-          timestamp: new Date()
-        },
+      users.set(ws, username);
+      usernameToWsMap.set(username, ws);
+
+      sendJsonToWs(ws, { type: 'system', text: `Welcome ${username}!` });
+      // Send the current list of users to the newly connected client
+      sendJsonToWs(ws, { type: 'user_list', users: getActiveUsernames() });
+
+      // Notify others about the new user
+      broadcastJson(
+        { type: 'system', text: `${username} joined the chat.` },
         ws
       );
-      await Room.findOneAndUpdate(
-        { name: user.room },
-        { $push: { messages: { sender: user.username, text: msg.text } } },
-        { new: true, upsert: true }
-      );
+      // Broadcast updated user list to all other clients
+      broadcastJson({ type: 'user_joined', username: username }, ws);
+    } else if (msg.type === 'chat') {
+      const sender = users.get(ws) || 'Anonymous';
+      const messageText = msg.text.trim();
+
+      if (!messageText) return; // Don't send empty messages
+
+      // Check for mention syntax: starts with @ and then a username
+      const mentionMatch = messageText.match(/^@(\w+)\s(.+)/);
+
+      if (mentionMatch) {
+        const targetUsername = mentionMatch[1];
+        const actualMessage = mentionMatch[2];
+        const targetWs = usernameToWsMap.get(targetUsername);
+
+        if (targetWs) {
+          // Send whisper to the target user
+          sendJsonToWs(targetWs, {
+            type: 'whisper',
+            sender: sender,
+            text: actualMessage,
+            target: targetUsername // Include target for client-side display
+          });
+          // Send a copy of the whisper to the sender (so they see it too)
+          sendJsonToWs(ws, {
+            type: 'whisper',
+            sender: sender, // This will be 'You' on client side for self-messages
+            text: actualMessage,
+            target: targetUsername
+          });
+          console.log(
+            `Whisper from ${sender} to ${targetUsername}: "${actualMessage}"`
+          );
+        } else {
+          // Notify sender if target user is not found
+          sendJsonToWs(ws, {
+            type: 'system',
+            text: `User "${targetUsername}" not found or offline.`
+          });
+          console.log(
+            `Whisper attempt from ${sender} to non-existent user ${targetUsername}.`
+          );
+        }
+      } else {
+        // Normal public chat
+        broadcastJson({ type: 'chat', sender, text: messageText }, ws);
+        console.log(`Chat from ${sender}: "${messageText}"`);
+      }
     }
   });
 
   ws.on('close', () => {
-    const user = clients.get(ws);
-    if (user) {
-      const members = rooms.get(user.room);
-      if (members) {
-        members.delete(ws);
-        if (members.size === 0) rooms.delete(user.room);
-      }
-      broadcastToRoom(
-        user.room,
-        { type: 'system', text: `${user.username} left the room.` },
-        ws
-      );
-      broadcastRoomList();
-    }
-    clients.delete(ws);
+    const name = users.get(ws) || 'Anonymous';
+    console.log(`${name} disconnected`);
+
+    // Remove from maps
+    users.delete(ws);
+    usernameToWsMap.delete(name); // Remove by name as well
+
+    // Notify others that the user left and update user list
+    broadcastJson({ type: 'system', text: `${name} left the chat.` }, ws);
+    broadcastJson({ type: 'user_left', username: name }, ws);
   });
+
+  // Initial welcome message (this is before login type message is processed)
+  // The real welcome message happens after successful login
+  sendJsonToWs(ws, { type: 'system', text: 'Please log in with a username.' });
 });
 
-server.listen(port, () =>
-  console.log(`🚀 Server running at http://localhost:${port}`)
-);
+server.listen(port, () => {
+  console.log(`🚀 Chat server running at http://localhost:${port}`);
+});
