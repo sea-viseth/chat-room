@@ -7,7 +7,12 @@
       body {
         font-family: Arial;
         max-width: 700px;
+        min-width: none;
         margin: 2rem auto;
+      }
+      .container {
+        width: 100%;
+        margin: 0 5%;
       }
       #roomsList div {
         cursor: pointer;
@@ -41,42 +46,37 @@
     </style>
   </head>
   <body>
-    <h1>Multi-Room Chat</h1>
+    <div class="container">
+      <h1>Multi-Room Chat</h1>
 
-    <h3>Active Rooms</h3>
-    <div id="roomsList">(loading...)</div>
+      <h3>Active Rooms</h3>
+      <div id="roomsList">(loading...)</div>
 
-    <!-- <h3>Join Room</h3>
-  <div>
-    <input id="room" placeholder="Room name (e.g. room42)">
-    <input id="username" placeholder="Username">
-    <button id="join">Join Room</button>
-  </div> -->
+      <h3>Join Room</h3>
+      <div>
+        <input id="room" placeholder="Room name (e.g. room42)" />
+        <span
+          id="fixedUsername"
+          style="font-weight: bold; margin-left: 1rem; color: green"
+        ></span>
+        <button id="join">Join Room</button>
+        <button onclick="resetUsername()">Change username</button>
+      </div>
 
-    <h3>Join Room</h3>
-    <div>
-      <input id="room" placeholder="Room name (e.g. room42)" />
-      <span
-        id="fixedUsername"
-        style="font-weight: bold; margin-left: 1rem; color: green"
-      ></span>
-      <button id="join">Join Room</button>
-      <button onclick="resetUsername()">Change username</button>
-    </div>
-
-    <div id="chatArea" style="display: none">
-      <div id="messages"></div>
-      <div
-        id="onlineUsers"
-        style="margin-top: 1rem; font-size: 0.9em; color: #555"
-      ></div>
-      <textarea
-        id="input"
-        placeholder="Type a message..."
-        rows="5"
-        style="width: 100%; resize: vertical"
-      ></textarea>
-      <button id="send" type="submit">Send</button>
+      <div id="chatArea" style="display: none">
+        <div id="messages"></div>
+        <div
+          id="onlineUsers"
+          style="margin-top: 1rem; font-size: 0.9em; color: #555"
+        ></div>
+        <textarea
+          id="input"
+          placeholder="Type a message..."
+          rows="5"
+          style="width: 100%; resize: vertical"
+        ></textarea>
+        <button id="send" type="submit">Send</button>
+      </div>
     </div>
 
     <script>

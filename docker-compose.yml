@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # MongoDB service
+  mongodb:
+    image: mongo:7.0
+    container_name: websocket-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+      MONGO_INITDB_DATABASE: chat-bot
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d
+    networks:
+      - websocket-network
+
+  # Node.js WebSocket application
+  websocket-app:
+    build: .
+    container_name: websocket-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - MONGO_URI=mongodb://admin:password123@mongodb:27017/chat-bot?authSource=admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - mongodb
+    networks:
+      - websocket-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  websocket-network:
+    driver: bridge
