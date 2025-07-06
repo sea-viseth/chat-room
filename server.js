@@ -90,7 +90,7 @@ wss.on('connection', (ws) => {
       if (!messageText) return; // Don't send empty messages
 
       // Check for mention syntax: starts with @ and then a username
-      const mentionMatch = messageText.match(/^@(\w+)\s(.+)/);
+      const mentionMatch = messageText.match(/^@([^:]+):\s*(.+)/);
 
       if (mentionMatch) {
         const targetUsername = mentionMatch[1];

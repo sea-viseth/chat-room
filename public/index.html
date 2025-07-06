@@ -497,8 +497,7 @@
         }
 
         // Check for mention syntax to send a whisper
-        const mentionMatch = messageText.match(/^@(\w+)\s(.+)/);
-
+        const mentionMatch = messageText.match(/^@([^:]+):\s*(.+)/);
         if (mentionMatch) {
           const targetUsername = mentionMatch[1];
           // The actual message content after the @username and a space
@@ -582,7 +581,7 @@
             const value = inputField.value;
             const atIndex = value.lastIndexOf('@');
             // Replace the current content after '@' with the selected username + a space
-            inputField.value = value.substring(0, atIndex) + `@${user} `;
+            inputField.value = value.substring(0, atIndex) + `@${user}: `;
             userSuggestionsDiv.style.display = 'none';
             inputField.focus(); // Keep focus on the input field after selection
           });
