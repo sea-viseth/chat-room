@@ -279,6 +279,9 @@
       #user-suggestions div:hover {
         background-color: var(--my-message-bg);
       }
+      #user-lists h3 {
+        color: #28a745;
+      }
 
       /* Media Queries for better responsiveness */
       @media (max-width: 768px) {
@@ -328,6 +331,7 @@
         <input id="input" placeholder="Type a message..." disabled />
         <button id="send" disabled>Send</button>
       </div>
+      <div id="user-lists"></div>
     </div>
 
     <script>
@@ -417,20 +421,16 @@
           if (msg.type === 'system') {
             appendMessage('System', msg.text, 'system');
             if (msg.text.includes('Welcome')) {
-              // A successful login message
               setConnectionStatus('connected', `Connected as ${username}`);
               document.title = `Chat | ${username}`;
             } else if (
               msg.text.includes('Username') &&
               msg.text.includes('already taken')
             ) {
-              // Handle duplicate username case, prompt again or disconnect
               alert(msg.text);
-              location.reload(); // Reload to re-prompt for username
+              location.reload();
             }
           } else if (msg.type === 'chat') {
-            // Only append if it's not our own message (we append our own immediately on send)
-            // This prevents duplicate messages if the server *were* to echo back the sender's own public message.
             if (msg.sender !== username) {
               appendMessage(msg.sender, msg.text, 'chat');
             }
@@ -439,7 +439,16 @@
             appendMessage(msg.sender, msg.text, 'whisper', msg.target);
           } else if (msg.type === 'user_list') {
             activeUsers = new Set(msg.users);
-            console.log('Active users:', Array.from(activeUsers));
+            const userListsDiv = document.getElementById('user-lists');
+            const userListItems = Array.from(activeUsers)
+              .map((user) => `<li>${user}</li>`)
+              .join('');
+            userListsDiv.innerHTML = `
+              <h3>Active Users:</h3>
+              <ul>
+              ${userListItems}
+              </ul>
+            `;
           } else if (msg.type === 'user_joined') {
             activeUsers.add(msg.username);
             console.log(

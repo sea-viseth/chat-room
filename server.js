@@ -148,7 +148,7 @@ wss.on('connection', (ws) => {
 
   // Initial welcome message (this is before login type message is processed)
   // The real welcome message happens after successful login
-  sendJsonToWs(ws, { type: 'system', text: 'Please log in with a username.' });
+  // sendJsonToWs(ws, { type: 'system', text: 'Please log in with a username.' });
 });
 
 server.listen(port, () => {
