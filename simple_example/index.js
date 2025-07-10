@@ -5,11 +5,6 @@ import { WebSocketServer } from 'ws';
 const app = express();
 const port = 3000;
 
-// HTTP routes
-app.get('/', (req, res) => {
-  res.send('Hello from Express + WebSocket Chat!');
-});
-
 // Create HTTP server
 const server = http.createServer(app);
 
@@ -36,7 +31,6 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     console.log('Received:', message.toString());
 
-    // Broadcast to all other clients
     broadcast(message.toString(), ws);
   });
 
@@ -48,7 +42,6 @@ wss.on('connection', (ws) => {
   ws.send('Welcome to the chat room!');
 });
 
-// Start server
 server.listen(port, () => {
   console.log(`🚀 Server running at http://localhost:${port}`);
   console.log(`WebSocket chat on ws://localhost:${port}`);

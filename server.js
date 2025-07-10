@@ -17,17 +17,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Keep a simple map of clients to usernames (WebSocket -> username)
 const users = new Map();
-// Keep a reverse map for easy lookup (username -> WebSocket) for whispers
 const usernameToWsMap = new Map();
 
-// Helper to get current list of active usernames
 function getActiveUsernames() {
   return Array.from(users.values());
 }
 
-// Function to broadcast JSON messages to all clients, optionally excluding one
 function broadcastJson(obj, exceptWs = null) {
   const msg = JSON.stringify(obj);
   wss.clients.forEach((client) => {
@@ -37,7 +33,6 @@ function broadcastJson(obj, exceptWs = null) {
   });
 }
 
-// Function to send a JSON message to a specific WebSocket client
 function sendJsonToWs(ws, obj) {
   if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify(obj));
@@ -59,13 +54,12 @@ wss.on('connection', (ws) => {
     // Handle login
     if (msg.type === 'login') {
       const username = msg.username;
-      // Basic check for unique username (optional, could be more robust)
       if (usernameToWsMap.has(username)) {
         sendJsonToWs(ws, {
           type: 'system',
           text: `Username "${username}" is already taken. Please choose another.`
         });
-        ws.close(); // Close connection for duplicate username
+        ws.close();
         return;
       }
 
@@ -73,23 +67,18 @@ wss.on('connection', (ws) => {
       usernameToWsMap.set(username, ws);
 
       sendJsonToWs(ws, { type: 'system', text: `Welcome ${username}!` });
-      // Send the current list of users to the newly connected client
       sendJsonToWs(ws, { type: 'user_list', users: getActiveUsernames() });
 
-      // Notify others about the new user
       broadcastJson(
         { type: 'system', text: `${username} joined the chat.` },
         ws
       );
-      // Broadcast updated user list to all other clients
       broadcastJson({ type: 'user_joined', username: username }, ws);
     } else if (msg.type === 'chat') {
       const sender = users.get(ws) || 'Anonymous';
       const messageText = msg.text.trim();
 
       if (!messageText) return; // Don't send empty messages
-
-      // Check for mention syntax: starts with @ and then a username
       const mentionMatch = messageText.match(/^@([^:]+):\s*(.+)/);
 
       if (mentionMatch) {
@@ -98,17 +87,15 @@ wss.on('connection', (ws) => {
         const targetWs = usernameToWsMap.get(targetUsername);
 
         if (targetWs) {
-          // Send whisper to the target user
           sendJsonToWs(targetWs, {
             type: 'whisper',
             sender: sender,
             text: actualMessage,
-            target: targetUsername // Include target for client-side display
+            target: targetUsername
           });
-          // Send a copy of the whisper to the sender (so they see it too)
           sendJsonToWs(ws, {
             type: 'whisper',
-            sender: sender, // This will be 'You' on client side for self-messages
+            sender: sender,
             text: actualMessage,
             target: targetUsername
           });
@@ -116,7 +103,6 @@ wss.on('connection', (ws) => {
             `Whisper from ${sender} to ${targetUsername}: "${actualMessage}"`
           );
         } else {
-          // Notify sender if target user is not found
           sendJsonToWs(ws, {
             type: 'system',
             text: `User "${targetUsername}" not found or offline.`
@@ -126,7 +112,6 @@ wss.on('connection', (ws) => {
           );
         }
       } else {
-        // Normal public chat
         broadcastJson({ type: 'chat', sender, text: messageText }, ws);
         console.log(`Chat from ${sender}: "${messageText}"`);
       }
